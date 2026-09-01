@@ -1,0 +1,12 @@
+profile.env
+.state/
+*.jsonl
+__pycache__/
+*.py[cod]
+.task-report.md
+*.safetensors
+*.bin
+*.pt
+*.ckpt
+*.gguf
+*.onnx

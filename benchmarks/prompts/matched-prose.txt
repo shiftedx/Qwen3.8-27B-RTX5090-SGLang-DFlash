@@ -1,0 +1,1 @@
+Write a rigorous technical deep dive on speculative decoding and the verification-acceptance paradigm.

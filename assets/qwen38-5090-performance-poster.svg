@@ -1,0 +1,83 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1920" viewBox="0 0 1080 1920">
+  <style>
+    .display { font-family: "Arial Narrow", "Bahnschrift Condensed", Arial, sans-serif; font-weight: 900; }
+    .mono { font-family: "Cascadia Mono", Consolas, monospace; }
+    .ivory { fill: #f1eee5; }
+    .red { fill: #ff3b30; }
+    .muted { fill: #77736b; }
+    .rule { stroke: #242424; stroke-width: 2; }
+  </style>
+  <rect width="1080" height="1920" fill="#090909"/>
+  <g class="rule" opacity=".8">
+    <line x1="42" y1="42" x2="42" y2="1878"/><line x1="1038" y1="42" x2="1038" y2="1878"/>
+    <line x1="42" y1="276" x2="1038" y2="276"/><line x1="42" y1="662" x2="1038" y2="662"/>
+    <line x1="42" y1="1094" x2="1038" y2="1094"/><line x1="42" y1="1396" x2="1038" y2="1396"/>
+    <line x1="42" y1="1570" x2="1038" y2="1570"/><line x1="42" y1="1734" x2="1038" y2="1734"/>
+  </g>
+  <rect x="42" y="42" width="18" height="198" fill="#ff3b30"/>
+  <text x="86" y="72" class="mono red" font-size="20">01 / LOCAL INFERENCE SYSTEM</text>
+  <text x="82" y="171" class="display ivory" font-size="118" letter-spacing="-5">QWEN3.8</text>
+  <text x="86" y="228" class="display ivory" font-size="48">27B / RTX 5090</text>
+  <text x="1038" y="225" text-anchor="end" class="mono muted" font-size="20">SINGLE GPU · SGLANG · DFLASH2</text>
+
+  <text x="42" y="326" class="mono muted" font-size="20">PHYSICAL TARGET KV CAPACITY</text>
+  <text x="42" y="488" class="display red" font-size="168" letter-spacing="-8">+44.0%</text>
+  <text x="46" y="535" class="mono ivory" font-size="22">MEASURED CAPACITY GAIN</text>
+  <rect x="676" y="320" width="362" height="250" fill="#f1eee5"/>
+  <text x="702" y="363" class="mono" fill="#090909" font-size="18">BEFORE / LEGACY</text>
+  <text x="702" y="421" class="display" fill="#090909" font-size="54">108,088</text>
+  <line x1="702" y1="444" x2="1012" y2="444" stroke="#090909" stroke-width="3"/>
+  <text x="702" y="480" class="mono" fill="#090909" font-size="18">NOW / BOUNDED</text>
+  <text x="702" y="540" class="display" fill="#ff3b30" font-size="62">155,648</text>
+  <text x="42" y="616" class="mono muted" font-size="18">TARGET POOL 155,648 · FIXED DRAFT RING 16,395 · LOGICAL MODEL CEILING 237,568</text>
+  <text x="42" y="643" class="mono ivory" font-size="18">PROMPT + OUTPUT MUST FIT THE PHYSICAL 155,648-TOKEN POOL.</text>
+
+  <text x="42" y="704" class="mono red" font-size="20">02 / SINGLE-STREAM THROUGHPUT</text>
+  <g>
+    <rect x="42" y="732" width="478" height="156" fill="#f1eee5"/>
+    <text x="66" y="808" class="display" fill="#090909" font-size="76">204.7</text>
+    <text x="349" y="803" class="mono" fill="#090909" font-size="18">TOK/S</text>
+    <text x="66" y="852" class="mono" fill="#090909" font-size="17">MATCHED PROSE · MEDIAN 3 · AFTER WARMUP</text>
+    <rect x="560" y="732" width="478" height="156" fill="#ff3b30"/>
+    <text x="584" y="808" class="display" fill="#090909" font-size="76">405.5</text>
+    <text x="867" y="803" class="mono" fill="#090909" font-size="18">TOK/S</text>
+    <text x="584" y="852" class="mono" fill="#090909" font-size="17">MATCHED CODE · MEDIAN 3 · AFTER WARMUP</text>
+    <rect x="42" y="916" width="478" height="142" fill="#242424"/>
+    <text x="66" y="982" class="display ivory" font-size="62">130.6</text>
+    <text x="319" y="978" class="mono muted" font-size="18">TOK/S</text>
+    <text x="66" y="1026" class="mono ivory" font-size="17">8,187 PROMPT + 1,024 OUTPUT</text>
+    <rect x="560" y="916" width="478" height="142" fill="#242424"/>
+    <text x="584" y="982" class="display ivory" font-size="62">138.3</text>
+    <text x="837" y="978" class="mono muted" font-size="18">TOK/S</text>
+    <text x="584" y="1026" class="mono ivory" font-size="17">154,515 + 1,024 · COLD START 2</text>
+  </g>
+  <text x="42" y="1080" class="mono muted" font-size="17">THROUGHPUT VARIES WITH PROMPT + DFLASH ACCEPTANCE · COLD GATES ARE SINGLE RUNS</text>
+
+  <text x="42" y="1136" class="mono red" font-size="20">03 / WHAT CHANGED</text>
+  <g class="mono" font-size="19">
+    <text x="42" y="1180" class="red">01</text><text x="92" y="1180" class="ivory">BOUNDED DRAFT KV TO A PRIVATE 16,395-TOKEN RING</text>
+    <text x="42" y="1231" class="red">02</text><text x="92" y="1231" class="ivory">ADDED RING-SAFE ROUTING + TARGET/DRAFT ID SEPARATION</text>
+    <text x="42" y="1282" class="red">03</text><text x="92" y="1282" class="ivory">PRESERVED K=9 + BOTH DFLASH VERIFY CUDA GRAPHS</text>
+    <text x="42" y="1333" class="red">04</text><text x="92" y="1333" class="ivory">DROPPED LOADER PAGE CACHE; PINNED IMAGE, MODELS + SEED</text>
+  </g>
+  <text x="42" y="1372" class="mono muted" font-size="18">HOST-RAM FLAG: --weight-loader-drop-cache-after-load</text>
+
+  <rect x="42" y="1428" width="996" height="112" fill="#f1eee5"/>
+  <text x="62" y="1463" class="mono" fill="#090909" font-size="18">SGLANG · QWEN3.8-27B NVFP4 · DFLASH2 K=9 · FP8 E4M3 KV · MF 0.93</text>
+  <text x="62" y="1497" class="mono" fill="#090909" font-size="18">CHUNK 1024 · RADIX OFF · VERIFY GRAPHS CAPTURED · MAX REQUESTS 1</text>
+  <text x="62" y="1531" class="mono" fill="#090909" font-size="18">SEED 42 · WSL2 · OPENAI-COMPATIBLE API :1234</text>
+
+  <text x="42" y="1612" class="mono red" font-size="20">04 / TESTED, THEN REJECTED</text>
+  <text x="42" y="1659" class="display ivory" font-size="34">K=7</text>
+  <text x="150" y="1656" class="mono muted" font-size="18">+0.29 GB FREE / -2.8% PROSE / -22.5% CODE</text>
+  <text x="42" y="1707" class="display ivory" font-size="34">163,840</text>
+  <text x="230" y="1704" class="mono muted" font-size="18">MATCHED SHORT · DRAFT GRAPH DISABLED</text>
+  <text x="230" y="1728" class="mono muted" font-size="18">173.0 TOK/S / NOT PROMOTED</text>
+
+  <text x="42" y="1774" class="mono red" font-size="20">MEASURED, NOT PROJECTED.</text>
+  <text x="42" y="1810" class="mono ivory" font-size="18">ONE RTX 5090 · SINGLE STREAM · OUTPUT HASHES:</text>
+  <text x="42" y="1840" class="mono muted" font-size="18">PROSE 4f98d785 · CODE c511aeb4 · 8K fe9f3361 · NEAR-CAP bd1545c1</text>
+  <text x="42" y="1860" class="mono muted" font-size="18">benchmarks/RESULTS.md</text>
+  <text x="42" y="1882" class="mono muted" font-size="18">github.com/shiftedx/Qwen3.8-27B-RTX5090-SGLang-DFlash</text>
+  <rect x="990" y="1758" width="48" height="120" fill="#ff3b30"/>
+</svg>

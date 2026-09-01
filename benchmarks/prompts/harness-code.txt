@@ -1,0 +1,1 @@
+Implement a small pure Python function that validates a bounded ring buffer, then explain its time and space complexity.

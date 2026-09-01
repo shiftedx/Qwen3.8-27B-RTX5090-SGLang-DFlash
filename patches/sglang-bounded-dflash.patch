@@ -1,0 +1,629 @@
+diff --git a/python/sglang/kernels/ops/speculative/cache_locs.py b/python/sglang/kernels/ops/speculative/cache_locs.py
+index ec1953d66c..3b061b3034 100644
+--- a/python/sglang/kernels/ops/speculative/cache_locs.py
++++ b/python/sglang/kernels/ops/speculative/cache_locs.py
+@@ -326,6 +326,85 @@ def rebuild_compact_draft_req_to_token_func(
+     )
+ 
+ 
++@triton.jit
++def rebuild_bounded_draft_req_to_token(
++    draft_req_to_token,
++    req_pool_indices,
++    suffix_start,
++    draft_prefix_lens,
++    scratch_cache_loc,
++    scratch_loc_stride,
++    draft_pool_len: tl.constexpr,
++    window_tokens: tl.constexpr,
++    block_size: tl.constexpr,
++):
++    """Rebuild a draft-local ring row without reading target physical ids."""
++    BLOCK: tl.constexpr = 256
++    pid = tl.program_id(axis=0)
++    req = tl.load(req_pool_indices + pid).to(tl.int64)
++    start = tl.load(suffix_start + pid).to(tl.int64)
++    prefix_len = tl.load(draft_prefix_lens + pid).to(tl.int64)
++    total = prefix_len + block_size
++
++    dst_row = draft_req_to_token + req * draft_pool_len
++    scratch_row = scratch_cache_loc + pid * scratch_loc_stride
++
++    offs = tl.arange(0, BLOCK).to(tl.int64)
++    num_loop = tl.cdiv(total, BLOCK)
++    for i in range(num_loop):
++        col = offs + i * BLOCK
++        in_prefix = col < prefix_len
++        in_block = (col >= prefix_len) & (col < total)
++        absolute_pos = start + col
++        committed = 1 + absolute_pos % window_tokens
++        scratch = tl.load(scratch_row + (col - prefix_len), mask=in_block, other=0)
++        value = tl.where(in_prefix, committed, scratch)
++        tl.store(dst_row + col, value, mask=in_prefix | in_block)
++
++
++def rebuild_bounded_draft_req_to_token_func(
++    *,
++    draft_req_to_token: torch.Tensor,
++    req_pool_indices: torch.Tensor,
++    suffix_start: torch.Tensor,
++    draft_prefix_lens: torch.Tensor,
++    scratch_cache_loc_2d: torch.Tensor,
++    batch_size: int,
++    block_size: int,
++    window_tokens: int,
++) -> None:
++    if draft_req_to_token.device.type == "cpu":
++        for batch_idx in range(batch_size):
++            req = int(req_pool_indices[batch_idx])
++            start = int(suffix_start[batch_idx])
++            prefix_len = int(draft_prefix_lens[batch_idx])
++            absolute_positions = torch.arange(
++                start,
++                start + prefix_len,
++                dtype=torch.int64,
++                device=draft_req_to_token.device,
++            )
++            draft_req_to_token[req, :prefix_len] = (
++                torch.remainder(absolute_positions, window_tokens) + 1
++            )
++            draft_req_to_token[req, prefix_len : prefix_len + block_size] = (
++                scratch_cache_loc_2d[batch_idx, :block_size]
++            )
++        return
++
++    rebuild_bounded_draft_req_to_token[(batch_size,)](
++        draft_req_to_token,
++        req_pool_indices,
++        suffix_start,
++        draft_prefix_lens,
++        scratch_cache_loc_2d,
++        scratch_cache_loc_2d.stride(0),
++        draft_req_to_token.shape[1],
++        window_tokens,
++        block_size,
++    )
++
++
+ @triton.jit
+ def assign_extend_cache_locs(
+     req_pool_indices,
+diff --git a/python/sglang/srt/arg_groups/speculative_hook.py b/python/sglang/srt/arg_groups/speculative_hook.py
+index 8a2650b631..a339d95668 100644
+--- a/python/sglang/srt/arg_groups/speculative_hook.py
++++ b/python/sglang/srt/arg_groups/speculative_hook.py
+@@ -78,6 +78,7 @@ def _resolve_speculative_algorithm_alias(
+ 
+ def handle_speculative_decoding(server_args: ServerArgs) -> None:
+     cfg = resolving_view(server_args)
++    _validate_dflash_bounded_cache(server_args)
+     if (
+         cfg.speculative_draft_model_path is not None
+         and cfg.speculative_draft_model_revision is None
+@@ -182,8 +183,64 @@ def handle_speculative_decoding(server_args: ServerArgs) -> None:
+         )
+ 
+ 
++def _validate_dflash_bounded_cache(server_args: ServerArgs) -> None:
++    cfg = resolving_view(server_args)
++    if not cfg.speculative_dflash_bounded_cache:
++        return
++
++    algorithm = cfg.speculative_algorithm
++    if algorithm is None or algorithm.upper() != "DFLASH":
++        raise ValueError(
++            "--speculative-dflash-bounded-cache requires "
++            f"--speculative-algorithm DFLASH, got {algorithm!r}."
++        )
++    if not cfg.device.startswith("cuda"):
++        raise ValueError(
++            "--speculative-dflash-bounded-cache requires --device cuda "
++            f"(CUDA or ROCm), got {cfg.device!r}."
++        )
++    if (
++        cfg.speculative_draft_window_size is None
++        or int(cfg.speculative_draft_window_size) <= 0
++    ):
++        raise ValueError(
++            "--speculative-dflash-bounded-cache requires a positive "
++            "--speculative-draft-window-size."
++        )
++    if cfg.max_running_requests != 1:
++        raise ValueError(
++            "--speculative-dflash-bounded-cache requires "
++            f"--max-running-requests 1, got {cfg.max_running_requests!r}."
++        )
++    if cfg.page_size != 1:
++        raise ValueError(
++            "--speculative-dflash-bounded-cache requires "
++            f"--page-size 1, got {cfg.page_size!r}."
++        )
++    if cfg.dcp_size != 1:
++        raise ValueError(
++            "--speculative-dflash-bounded-cache requires "
++            f"--dcp-size 1, got {cfg.dcp_size!r}."
++        )
++    if not cfg.disable_radix_cache:
++        raise ValueError(
++            "--speculative-dflash-bounded-cache requires --disable-radix-cache."
++        )
++    if cfg.enable_hierarchical_cache:
++        raise ValueError(
++            "--speculative-dflash-bounded-cache is incompatible with "
++            "--enable-hierarchical-cache."
++        )
++    if cfg.disaggregation_mode != "null":
++        raise ValueError(
++            "--speculative-dflash-bounded-cache requires "
++            f"--disaggregation-mode null, got {cfg.disaggregation_mode!r}."
++        )
++
++
+ def _handle_dflash(server_args: ServerArgs) -> None:
+     cfg = resolving_view(server_args)
++    _validate_dflash_bounded_cache(server_args)
+ 
+     if not (cfg.device.startswith("cuda") or cfg.device == "npu"):
+         raise ValueError(
+diff --git a/python/sglang/srt/model_executor/pool_configurator.py b/python/sglang/srt/model_executor/pool_configurator.py
+index 534148026a..b33caa4034 100644
+--- a/python/sglang/srt/model_executor/pool_configurator.py
++++ b/python/sglang/srt/model_executor/pool_configurator.py
+@@ -94,7 +94,11 @@ def _dflash_draft_cell_size(kvc: KVCacheConfigurator) -> int:
+     pool spans the allocator's widened virtual location space, so the draft
+     term is replicated across DCP ranks.
+     """
+-    if kvc.is_draft_worker or not kvc.spec_algorithm.is_dflash_family():
++    if (
++        kvc.is_draft_worker
++        or not kvc.spec_algorithm.is_dflash_family()
++        or get_spec().speculative_dflash_bounded_cache
++    ):
+         return 0
+     cell_size = kvc.spec_aux_config.dflash_draft_cell_size_per_token
+     if cell_size is None or int(cell_size) <= 0:
+@@ -102,6 +106,32 @@ def _dflash_draft_cell_size(kvc: KVCacheConfigurator) -> int:
+     return int(cell_size) * get_parallel().attn_dcp_size
+ 
+ 
++def _dflash_bounded_draft_reserve_bytes(kvc: KVCacheConfigurator) -> int:
++    spec = get_spec()
++    if (
++        kvc.is_draft_worker
++        or not kvc.spec_algorithm.is_dflash_family()
++        or not spec.speculative_dflash_bounded_cache
++    ):
++        return 0
++
++    from sglang.srt.speculative.dflash_bounded_cache import (
++        DFlashBoundedCacheLayout,
++    )
++
++    draft_cell_size = kvc.spec_aux_config.dflash_draft_cell_size_per_token
++    if draft_cell_size is None or int(draft_cell_size) <= 0:
++        raise ValueError(
++            "Bounded DFlash cache requires a positive resolved "
++            "dflash_draft_cell_size_per_token."
++        )
++    layout = DFlashBoundedCacheLayout(
++        window_tokens=int(spec.speculative_draft_window_size),
++        block_tokens=int(spec.speculative_num_draft_tokens),
++    )
++    return (layout.pool_tokens + int(kvc.page_size)) * int(draft_cell_size)
++
++
+ def _get_dsv4_compress_state_dtype_sizes() -> tuple[int, int]:
+     dtype_name = envs.SGLANG_DSV4_COMPRESS_STATE_DTYPE.get().strip().lower()
+     if dtype_name in ("float32", "fp32"):
+@@ -149,6 +179,9 @@ class DefaultPoolConfigurator(MemoryPoolConfigurator):
+ 
+     def __init__(self, kvc: KVCacheConfigurator):
+         self.kv_cache_dtype_str = kvc.kv_cache_dtype_str
++        self._dflash_bounded_draft_reserve_bytes = _dflash_bounded_draft_reserve_bytes(
++            kvc
++        )
+         # Determine effective number of layers for KV cache
+         if mambaish := mambaish_config(kvc.model_config):
+             effective_layer_ids = [
+@@ -219,7 +252,11 @@ class DefaultPoolConfigurator(MemoryPoolConfigurator):
+         # max_total_num_tokens, whose per-token footprint can differ from the
+         # target's (e.g. an MLA-latent target paired with a full per-head K/V
+         # draft), so size from the draft config rather than the layer ratio.
+-        if kvc.spec_algorithm.is_dflash_family() and not kvc.is_draft_worker:
++        if (
++            kvc.spec_algorithm.is_dflash_family()
++            and not kvc.is_draft_worker
++            and not self._dflash_bounded_draft_reserve_bytes
++        ):
+             from sglang.srt.speculative.dflash_utils import (
+                 scale_kv_cell_size_per_token_for_dflash,
+             )
+@@ -420,8 +457,18 @@ class DefaultPoolConfigurator(MemoryPoolConfigurator):
+     def calculate_pool_sizes(
+         self, available_bytes: int, page_size: int
+     ) -> MemoryPoolConfig:
++        available_for_target = (
++            int(available_bytes) - self._dflash_bounded_draft_reserve_bytes
++        )
++        if self._dflash_bounded_draft_reserve_bytes and available_for_target <= 0:
++            raise RuntimeError(
++                "Not enough memory for bounded DFlash draft KV reserve: "
++                f"available_bytes={available_bytes}, "
++                "draft_reserve_bytes="
++                f"{self._dflash_bounded_draft_reserve_bytes}."
++            )
+         max_total_num_tokens = (
+-            available_bytes // self._cell_size
++            available_for_target // self._cell_size
+             if self._cell_size
+             else self._zero_kv_max_tokens
+         )
+diff --git a/python/sglang/srt/server_args.py b/python/sglang/srt/server_args.py
+index 7e1102e29e..6c1e153959 100644
+--- a/python/sglang/srt/server_args.py
++++ b/python/sglang/srt/server_args.py
+@@ -2196,6 +2196,12 @@ class ServerArgs:
+         "Sliding window size for the draft model. Honored by Llama EAGLE-3 (`LlamaForCausalLMEagle3`) and DFLASH only; other EAGLE-3 backends (e.g. MLA-based drafters) silently ignore it. For Llama EAGLE-3, the drafter only attends to the most recent N keys (verifier hidden states + its own outputs); the verifier is unaffected. For DFLASH, the draft worker keeps a recent target-token window in its local KV cache (paged backends may retain up to one extra page on the left for alignment). Default is full attention/context.",
+         NS("spec"),
+     ] = None
++    speculative_dflash_bounded_cache: A[
++        bool,
++        "Use an experimental fixed-size request-local DFlash draft KV ring. "
++        "Phase one requires one request, page size 1, and disabled radix cache.",
++        NS("spec"),
++    ] = False
+     speculative_moe_runner_backend: A[
+         Optional[str],
+         Arg(
+diff --git a/python/sglang/srt/speculative/dflash_bounded_cache.py b/python/sglang/srt/speculative/dflash_bounded_cache.py
+new file mode 100644
+index 0000000000..4a4509c83c
+--- /dev/null
++++ b/python/sglang/srt/speculative/dflash_bounded_cache.py
+@@ -0,0 +1,45 @@
++from dataclasses import dataclass
++
++import torch
++
++
++@dataclass(frozen=True, slots=True)
++class DFlashBoundedCacheLayout:
++    window_tokens: int
++    block_tokens: int
++    guard_tokens: int = 1
++
++    def __post_init__(self) -> None:
++        if self.window_tokens <= 0:
++            raise ValueError("window_tokens must be positive")
++        if self.block_tokens <= 0 or self.block_tokens > self.window_tokens:
++            raise ValueError("block_tokens must be in [1, window_tokens]")
++        if self.guard_tokens < 1:
++            raise ValueError("guard_tokens must be positive")
++
++    @property
++    def scratch_start(self) -> int:
++        return 1 + self.window_tokens
++
++    @property
++    def pool_tokens(self) -> int:
++        return self.scratch_start + self.block_tokens + self.guard_tokens
++
++    def committed_slots(self, positions: torch.Tensor) -> torch.Tensor:
++        """Map positions into the ring, normalizing negative sentinels to -1."""
++        positions = positions.to(torch.int64)
++        slots = torch.remainder(positions, self.window_tokens).add(1)
++        return torch.where(positions < 0, -1, slots)
++
++    def scratch_slots(self, device: torch.device | str) -> torch.Tensor:
++        return torch.arange(
++            self.scratch_start,
++            self.scratch_start + self.block_tokens,
++            dtype=torch.int64,
++            device=device,
++        )
++
++    def fixed_bytes(self, bytes_per_token: int) -> int:
++        if bytes_per_token <= 0:
++            raise ValueError("bytes_per_token must be positive")
++        return self.pool_tokens * bytes_per_token
+diff --git a/python/sglang/srt/speculative/dflash_worker_v2.py b/python/sglang/srt/speculative/dflash_worker_v2.py
+index 9afb443779..1ceedeaa5c 100644
+--- a/python/sglang/srt/speculative/dflash_worker_v2.py
++++ b/python/sglang/srt/speculative/dflash_worker_v2.py
+@@ -7,6 +7,7 @@ import torch
+ 
+ from sglang.kernels.ops.speculative.cache_locs import (
+     assign_extend_cache_locs_func,
++    rebuild_bounded_draft_req_to_token_func,
+     rebuild_compact_draft_req_to_token_func,
+ )
+ from sglang.kernels.ops.speculative.dflash import (
+@@ -33,6 +34,7 @@ from sglang.srt.model_executor.forward_batch_info import (
+     ForwardMode,
+     compute_position,
+ )
++from sglang.srt.model_executor.pool_configurator import MemoryPoolConfig
+ from sglang.srt.runtime_context import (
+     get_exec,
+     get_schedule,
+@@ -41,6 +43,7 @@ from sglang.srt.runtime_context import (
+ )
+ from sglang.srt.server_args import ServerArgs
+ from sglang.srt.speculative.base_spec_worker import BaseSpecWorker
++from sglang.srt.speculative.dflash_bounded_cache import DFlashBoundedCacheLayout
+ from sglang.srt.speculative.dflash_info import DFlashVerifyInput
+ from sglang.srt.speculative.dflash_info_v2 import DFlashDraftInputV2
+ from sglang.srt.speculative.dflash_utils import (
+@@ -71,6 +74,7 @@ from sglang.srt.speculative.spec_utils import (
+     build_grammar_vocab_mask,
+ )
+ from sglang.srt.utils import get_available_gpu_memory, is_cuda, is_hip, is_npu
++from sglang.srt.utils.async_probe import maybe_detect_oob
+ 
+ _is_npu = is_npu()
+ 
+@@ -337,6 +341,13 @@ class DFlashWorkerV2(BaseSpecWorker):
+                 )
+         self.draft_model.set_block_size(self.block_size)
+         self.speculative_num_draft_tokens = int(self.block_size)
++        self._bounded_layout: Optional[DFlashBoundedCacheLayout] = None
++        if get_spec().speculative_dflash_bounded_cache:
++            assert self.draft_window_size is not None
++            self._bounded_layout = DFlashBoundedCacheLayout(
++                window_tokens=int(self.draft_window_size),
++                block_tokens=self.block_size,
++            )
+ 
+         self._mask_token = draft_config.mask_token
+         self._mask_token_id_override = draft_config.mask_token_id
+@@ -380,6 +391,9 @@ class DFlashWorkerV2(BaseSpecWorker):
+         self._draft_verify_out_cache_loc_buf: Optional[torch.Tensor] = (
+             None  # [cap_bs, block_size]
+         )
++        self._draft_scratch_cache_loc_buf: Optional[torch.Tensor] = (
++            None  # [cap_bs, block_size]
++        )
+         self._draft_block_end_buf: Optional[torch.Tensor] = None  # [cap_bs]
+         self._selector_sample: Optional[Tuple[torch.Tensor, torch.Tensor]] = None
+         self._draft_seq_lens_cpu_buf: Optional[torch.Tensor] = None  # [cap_bs] on CPU
+@@ -438,18 +452,60 @@ class DFlashWorkerV2(BaseSpecWorker):
+         req_to_token_pool=None,
+         token_to_kv_pool_allocator=None,
+     ):
+-        # Without draft windowing, the draft worker aliases the target
+-        # request->token mapping and allocation state. With draft windowing
+-        # enabled, the draft worker keeps a private compact req->token table
+-        # over the same global KV index space, so radix-cache/prefix-hit KV
+-        # remains reusable while draft attention sees only the recent window.
++        if self._bounded_layout is None:
++            # Without draft windowing, the draft worker aliases the target
++            # request->token mapping and allocation state. With draft windowing
++            # enabled, the draft worker keeps a private compact req->token table
++            # over the same global KV index space, so radix-cache/prefix-hit KV
++            # remains reusable while draft attention sees only the recent window.
++            self._draft_worker.alloc_memory_pool(
++                memory_pool_config=memory_pool_config,
++                req_to_token_pool=(
++                    None if self.use_compact_draft_cache else req_to_token_pool
++                ),
++                token_to_kv_pool_allocator=token_to_kv_pool_allocator,
++            )
++            return
++
++        layout = self._bounded_layout
++        draft_pool_config = MemoryPoolConfig(
++            max_total_num_tokens=layout.pool_tokens,
++            max_running_requests=1,
++        )
+         self._draft_worker.alloc_memory_pool(
+-            memory_pool_config=memory_pool_config,
+-            req_to_token_pool=(
+-                None if self.use_compact_draft_cache else req_to_token_pool
+-            ),
+-            token_to_kv_pool_allocator=token_to_kv_pool_allocator,
++            memory_pool_config=draft_pool_config,
++            req_to_token_pool=None,
++            token_to_kv_pool_allocator=None,
++        )
++
++        draft_runner = self.draft_model_runner
++        draft_req_pool = draft_runner.req_to_token_pool
++        draft_kv_pool = draft_runner.token_to_kv_pool
++        draft_allocator = draft_runner.token_to_kv_pool_allocator
++        physical_tokens = layout.pool_tokens
++        assert (
++            draft_req_pool is not req_to_token_pool
++        ), "Bounded DFlash draft request pool must not alias the target pool."
++        assert (
++            draft_kv_pool is not self.model_runner.token_to_kv_pool
++        ), "Bounded DFlash draft KV pool must not alias the target pool."
++        assert (
++            draft_allocator is not token_to_kv_pool_allocator
++        ), "Bounded DFlash draft allocator must not alias the target allocator."
++        assert draft_runner.max_total_num_tokens == physical_tokens
++        assert draft_kv_pool.size == physical_tokens
++        assert draft_allocator.size == physical_tokens
++        identity_probe = torch.tensor(
++            [0, physical_tokens],
++            dtype=torch.int64,
++            device=draft_allocator.device,
++        )
++        translated_probe = draft_allocator.translate_kv_indices_for_transfer(
++            identity_probe
+         )
++        assert torch.equal(
++            translated_probe, identity_probe
++        ), "Bounded DFlash draft allocator must preserve direct KV slot ids."
+ 
+     def init_attention_backends(self):
+         self._draft_worker.init_attention_backends()
+@@ -670,6 +726,11 @@ class DFlashWorkerV2(BaseSpecWorker):
+         self._draft_verify_out_cache_loc_buf = torch.empty(
+             (new_cap, block_size), dtype=torch.int64, device=device
+         )
++        if self._bounded_layout is not None:
++            scratch = self._bounded_layout.scratch_slots(device)
++            self._draft_scratch_cache_loc_buf = (
++                scratch.unsqueeze(0).expand(new_cap, -1).clone()
++            )
+         self._draft_block_end_buf = torch.empty(
+             (new_cap,), dtype=torch.int32, device=device
+         )
+@@ -817,6 +878,59 @@ class DFlashWorkerV2(BaseSpecWorker):
+             # Last resort: the legacy blocking D2H copy.
+             out.copy_(draft_prefix_lens)
+ 
++    def _validate_bounded_prefill_chunk(self, extend_lens: List[int]) -> None:
++        layout = self._bounded_layout
++        if layout is None or not extend_lens:
++            return
++        largest_chunk = max(int(length) for length in extend_lens)
++        if largest_chunk > layout.window_tokens:
++            raise RuntimeError(
++                "Bounded DFLASH prefill chunk exceeds the committed draft window: "
++                f"prefill chunk={largest_chunk}, window={layout.window_tokens}. "
++                "Set --chunked-prefill-size no larger than "
++                "--speculative-draft-window-size."
++            )
++
++    def _map_bounded_committed_cache_locs(
++        self, positions: torch.Tensor
++    ) -> torch.Tensor:
++        layout = self._bounded_layout
++        if layout is None:
++            raise RuntimeError("Bounded DFLASH committed mapping is not enabled.")
++        cache_locs = layout.committed_slots(positions)
++        maybe_detect_oob(
++            cache_locs,
++            low=1,
++            high=layout.pool_tokens,
++            msg="bounded DFLASH committed draft slots",
++        )
++        return cache_locs
++
++    def _route_bounded_cache_locs(
++        self,
++        *,
++        target_cache_loc_2d: torch.Tensor,
++        positions_2d: torch.Tensor,
++    ) -> Tuple[torch.Tensor, torch.Tensor]:
++        layout = self._bounded_layout
++        if layout is None or self._draft_scratch_cache_loc_buf is None:
++            raise RuntimeError("Bounded DFLASH scratch routing is not initialized.")
++        if target_cache_loc_2d.shape != positions_2d.shape:
++            raise ValueError(
++                "Bounded DFLASH target-location/position shape mismatch: "
++                f"{tuple(target_cache_loc_2d.shape)} vs {tuple(positions_2d.shape)}."
++            )
++        batch_size = int(target_cache_loc_2d.shape[0])
++        scratch_cache_loc_2d = self._draft_scratch_cache_loc_buf[:batch_size]
++        committed_cache_loc_2d = self._map_bounded_committed_cache_locs(positions_2d)
++        maybe_detect_oob(
++            scratch_cache_loc_2d,
++            low=1,
++            high=layout.pool_tokens,
++            msg="bounded DFLASH draft scratch slots",
++        )
++        return scratch_cache_loc_2d, committed_cache_loc_2d
++
+     def _rebuild_compact_draft_cache(
+         self,
+         *,
+@@ -827,9 +941,21 @@ class DFlashWorkerV2(BaseSpecWorker):
+         bs: int,
+         block_size: int,
+     ) -> None:
+-        """Write the draft-local compact req->token rows: the committed suffix
+-        window at [0, draft_prefix_len) plus the verify block slots after it."""
++        """Write draft-local rows: committed suffix then proposal scratch."""
+         suffix_start = prefix_lens.to(torch.int64) - draft_prefix_lens.to(torch.int64)
++        if self._bounded_layout is not None:
++            rebuild_bounded_draft_req_to_token_func(
++                draft_req_to_token=self.draft_model_runner.req_to_token_pool.req_to_token,
++                req_pool_indices=req_pool_indices,
++                suffix_start=suffix_start,
++                draft_prefix_lens=draft_prefix_lens,
++                scratch_cache_loc_2d=verify_out_cache_loc_2d,
++                batch_size=bs,
++                block_size=block_size,
++                window_tokens=self._bounded_layout.window_tokens,
++            )
++            return
++
+         if self._use_triton_compact_rebuild:
+             rebuild_compact_draft_req_to_token_func(
+                 draft_req_to_token=self.draft_model_runner.req_to_token_pool.req_to_token,
+@@ -1667,6 +1793,9 @@ class DFlashWorkerV2(BaseSpecWorker):
+         self._validate_phase1_sampling_support(batch)
+ 
+         if batch.forward_mode.is_extend() or batch.is_extend_in_batch:
++            if self._bounded_layout is not None and batch.extend_lens is not None:
++                self._validate_bounded_prefill_chunk(batch.extend_lens)
++
+             # Target prefill: capture DFlash aux hidden states for prompt tokens.
+             batch_output = self.target_worker.forward_batch_generation(
+                 batch,
+@@ -1712,9 +1841,13 @@ class DFlashWorkerV2(BaseSpecWorker):
+                 ctx_lens,
+                 int(sum(batch.extend_lens)),
+             )
++            draft_cache_loc = batch.out_cache_loc
++            if self._bounded_layout is not None:
++                draft_cache_loc = self._map_bounded_committed_cache_locs(positions)
++
+             self._append_target_hidden_to_draft_kv_by_loc(
+                 target_hidden=logits_output.hidden_states,
+-                cache_loc=batch.out_cache_loc,
++                cache_loc=draft_cache_loc,
+                 positions=positions,
+             )
+ 
+@@ -1855,7 +1988,19 @@ class DFlashWorkerV2(BaseSpecWorker):
+         input_embeds = noise_embedding.view(-1, noise_embedding.shape[-1])
+ 
+         positions = positions_2d.reshape(-1)
++        # Target verifier locations stay in the target pool. Bounded draft
++        # proposals use fixed scratch, and accepted canonical KV uses the ring.
+         verify_out_cache_loc = verify_out_cache_loc_2d.reshape(-1)
++        draft_out_cache_loc_2d = verify_out_cache_loc_2d
++        committed_cache_loc_2d = verify_out_cache_loc_2d
++        if self._bounded_layout is not None:
++            draft_out_cache_loc_2d, committed_cache_loc_2d = (
++                self._route_bounded_cache_locs(
++                    target_cache_loc_2d=verify_out_cache_loc_2d,
++                    positions_2d=positions_2d,
++                )
++            )
++        draft_out_cache_loc = draft_out_cache_loc_2d.reshape(-1)
+ 
+         seq_lens_cpu = self._draft_seq_lens_cpu_buf[:bs]
+         if self.use_compact_draft_cache:
+@@ -1871,7 +2016,7 @@ class DFlashWorkerV2(BaseSpecWorker):
+                 req_pool_indices=batch.req_pool_indices,
+                 prefix_lens=prefix_lens,
+                 draft_prefix_lens=draft_prefix_lens,
+-                verify_out_cache_loc_2d=verify_out_cache_loc_2d,
++                verify_out_cache_loc_2d=draft_out_cache_loc_2d,
+                 bs=bs,
+                 block_size=block_size,
+             )
+@@ -1901,7 +2046,7 @@ class DFlashWorkerV2(BaseSpecWorker):
+             input_ids=block_ids.flatten(),
+             req_pool_indices=batch.req_pool_indices,
+             seq_lens=draft_seq_lens,
+-            out_cache_loc=verify_out_cache_loc,
++            out_cache_loc=draft_out_cache_loc,
+             seq_lens_sum=draft_seq_lens_sum,
+             seq_lens_cpu=seq_lens_cpu,
+             positions=positions,
+@@ -2155,8 +2300,8 @@ class DFlashWorkerV2(BaseSpecWorker):
+ 
+         self._append_target_hidden_to_draft_kv_by_loc(
+             target_hidden=hidden.reshape(-1, hidden.shape[-1]),
+-            cache_loc=verify_out_cache_loc,
+-            cache_loc_2d=verify_out_cache_loc_2d,
++            cache_loc=committed_cache_loc_2d.reshape(-1),
++            cache_loc_2d=committed_cache_loc_2d,
+             positions=positions,
+             commit_lens=commit_lens,
+         )
