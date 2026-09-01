@@ -17,9 +17,36 @@ RUNTIME = ROOT / "scripts" / "setup_runtime.sh"
 PREFLIGHT = ROOT / "scripts" / "preflight.sh"
 BENCHMARK = ROOT / "scripts" / "benchmark.py"
 INSTALLER = ROOT / "windows" / "Install-Desktop-Launchers.ps1"
+LAN_HELPER = ROOT / "windows" / "Enable-Qwen-LAN.ps1"
+WINDOWS_START = ROOT / "windows" / "Start-Qwen-Max.cmd"
 
 
 class ContractTests(unittest.TestCase):
+    def test_lan_helper_and_launcher_are_private_subnet_scoped(self):
+        helper = LAN_HELPER.read_text(encoding="utf-8")
+        launcher = WINDOWS_START.read_text(encoding="utf-8")
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        for value in (
+            "function Get-WslIPv4",
+            "function Get-WindowsLanIPv4",
+            "QwenSGLangLAN1234",
+            "ProgramData",
+            "LocalSubnet",
+            "Private",
+            "interface portproxy",
+            "Start-Process",
+            "-Verb RunAs",
+            "-Wait",
+        ):
+            self.assertIn(value, helper)
+        self.assertLess(launcher.index("Enable-Qwen-LAN.ps1"), launcher.index("keepalive.sh"))
+        for value in ("-Distro", '"%DISTRO%"', "-Port", "1234"):
+            self.assertIn(value, launcher)
+        for value in ("LAN", "LocalSubnet", "Private", "unauthenticated"):
+            self.assertIn(value, readme)
+        self.assertNotIn("-Profile Any", helper)
+        self.assertNotIn("-RemoteAddress Any", helper)
+
     def test_profile_has_pinned_qualified_values(self):
         source = PROFILE.read_text(encoding="utf-8")
         for value in (
