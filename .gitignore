@@ -4,6 +4,7 @@ profile.env
 __pycache__/
 *.py[cod]
 .task-report.md
+.worktrees/
 *.safetensors
 *.bin
 *.pt
