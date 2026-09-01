@@ -61,7 +61,7 @@ The token value is typed only after the session refresh, is hidden from the
 terminal, and is not placed as a literal in shell history. Run `unset HF_TOKEN`
 after setup if you do not need it in that shell.
 
-The endpoint is `http://127.0.0.1:1234/v1`, serving
+The local endpoint is `http://127.0.0.1:1234/v1`, serving
 `qwen3.8-27b-nvfp4`. Wait for startup and graph capture, then smoke-test it:
 
 ```bash
@@ -69,6 +69,32 @@ curl http://127.0.0.1:1234/v1/chat/completions \
   -H 'content-type: application/json' \
   -d '{"model":"qwen3.8-27b-nvfp4","messages":[{"role":"user","content":"Reply with exactly: ready"}],"max_tokens":16}'
 ```
+
+### Private-LAN access
+
+`windows/Start-Qwen-Max.cmd` also runs `Enable-Qwen-LAN.ps1`. On first use—or
+after a WSL or LAN address change—Windows displays a normal UAC prompt. The
+helper refreshes a TCP 1234 port proxy to Ubuntu and creates one inbound
+Windows Firewall rule named `QwenSGLangLAN1234`.
+
+The rule is restricted to the Windows **Private** profile and
+`LocalSubnet`; it is never opened for Public networks. The API is
+**unauthenticated**, so do not broaden this rule or forward port 1234 on your
+router. The helper prints the current LAN URL, typically:
+
+```text
+http://<windows-lan-ip>:1234/v1
+```
+
+From another trusted LAN device:
+
+```bash
+curl http://<windows-lan-ip>:1234/v1/models
+```
+
+The helper records only its own previous mapping under
+`%ProgramData%\QwenSGLang`, allowing the next desktop start to refresh a
+changed WSL address without touching unrelated port proxies.
 
 ## Profile and capacity semantics
 
@@ -167,6 +193,8 @@ K=7 was also rejected: it recovered about 0.29 GB after graph capture but was
 - **Token/download error:** export `HF_TOKEN` in the shell that runs setup;
   confirm access on the relevant model card.
 - **Port busy:** edit `PORT` in ignored `profile.env`, then restart.
+- **LAN URL unavailable:** confirm Windows marks the network Private, rerun
+  the desktop start launcher and accept UAC, then use the LAN URL it prints.
 - **Out of capacity:** reduce prompt or output so their total stays at or below
   155,648 tokens.
 
