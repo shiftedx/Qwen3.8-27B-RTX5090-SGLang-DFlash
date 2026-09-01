@@ -1,0 +1,14 @@
+Qwen3.8-27B-RTX5090-SGLang-DFlash is licensed under Apache-2.0.
+
+This repository contains launch tooling and a small patch only. No model
+weights, Docker image layers, benchmark JSONL, tokens, or other model artifacts
+are redistributed.
+
+Third-party projects and model cards:
+- SGLang: https://github.com/sgl-project/sglang (Apache-2.0)
+- Target model: https://huggingface.co/gittensor-model-hub/Qwen3.8-27B-NVFP4-RTX5090-LMHead4
+- Draft model: https://huggingface.co/z-lab/Qwen3.8-27B-DFlash2
+- Qwen base model: https://huggingface.co/Qwen/Qwen3.8-27B
+
+Use of downloaded models is subject to the terms shown on their respective
+model cards.
