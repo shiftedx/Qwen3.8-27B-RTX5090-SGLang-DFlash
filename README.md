@@ -75,7 +75,9 @@ curl http://127.0.0.1:1234/v1/chat/completions \
 The default remains the qualified DFlash profile. To select the separate native
 MTP checkpoint, replace the ignored local profile before setup/start; its
 profile-specific container name also makes the desktop start/stop launchers
-operate on the selected engine.
+operate on the selected engine. The public
+[checkpoint](https://huggingface.co/Shiftedx/Qwopus3.8-27B-Flash-NVFP4-MTP)
+is downloaded at immutable revision `667b435e24ffdd149f7ed4780cbe066e7e2d4446`.
 
 ```bash
 cp profiles/rtx5090-native-mtp-nvfp4.env.example profile.env
@@ -83,9 +85,9 @@ bash scripts/setup_profile.sh
 bash scripts/server.sh start
 ```
 
-This profile uses the existing read-only checkpoint directory
-`/root/models/Jackrong/Qwopus3.8-27B-Flash-NVFP4-MTP`, mounts it as `/model`
-for both target and native draft weights, and serves
+No Hugging Face token is required for this public download. Setup stores the
+checkpoint under `$HOME/models/Shiftedx/Qwopus3.8-27B-Flash-NVFP4-MTP`,
+mounts it read-only as `/model` for both target and native draft weights, and serves
 `qwopus3.8-27b-nvfp4-mtp` on port 1234. Setup builds and verifies the qualified
 bounded SGLang image from the example profile using its pinned base, SGLang
 revision, patch checksum, and provenance labels before it launches. It intentionally does not pass
