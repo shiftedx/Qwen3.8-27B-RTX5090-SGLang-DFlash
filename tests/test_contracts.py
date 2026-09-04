@@ -1,6 +1,7 @@
 import hashlib
 import importlib.util
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -10,6 +11,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 PROFILE = ROOT / "profiles" / "rtx5090-152k.env.example"
 NATIVE_MTP_PROFILE = ROOT / "profiles" / "rtx5090-native-mtp-nvfp4.env.example"
+NATIVE_MTP_MODEL_CARD = ROOT / "model-cards" / "qwopus3.8-27b-flash-nvfp4-mtp-rtx5090.md"
 PATCH = ROOT / "patches" / "sglang-bounded-dflash.patch"
 BUILD = ROOT / "scripts" / "build_bounded_image.sh"
 SERVER = ROOT / "scripts" / "server.sh"
@@ -86,9 +88,11 @@ class ContractTests(unittest.TestCase):
             "PROFILE=rtx5090-native-mtp-nvfp4",
             "CONTAINER_NAME=qwen38-sglang-native-mtp",
             "BOUNDED_IMAGE_REF=local/sglang:qwen38-bounded-dflash-a1fe4e30",
-            "MODEL_ROOT=/root/models",
-            "TARGET_REPO=Jackrong/Qwopus3.8-27B-Flash-NVFP4-MTP",
+            "MODEL_ROOT=$HOME/models",
+            "TARGET_REPO=Shiftedx/Qwopus3.8-27B-Flash-NVFP4-MTP",
+            "TARGET_REVISION=667b435e24ffdd149f7ed4780cbe066e7e2d4446",
             "ENGINE=native_mtp",
+            "SETUP_MODE=native_download",
             "CONTEXT_LENGTH=131072",
             "MAX_TOTAL_TOKENS=129241",
             "CHUNKED_PREFILL_SIZE=1024",
@@ -101,6 +105,8 @@ class ContractTests(unittest.TestCase):
             self.assertIn(value, source)
         self.assertNotIn("SERVER_IMAGE_REF=", source)
         self.assertNotIn("c66b5add33e7a18992399a43b500a716ef28c44362a83c6e5b7d89d3dae48a9d", source)
+        self.assertNotIn("Jackrong/Qwopus3.8-27B-Flash-NVFP4-MTP", source)
+        self.assertNotIn("Shiftedx/Qwopus3.8-27B-Flash-NVFP4-MTP-RTX5090", source)
 
     def test_resolve_runs_native_mtp_without_dflash_or_language_only_flags(self):
         values = dict(
@@ -125,7 +131,7 @@ class ContractTests(unittest.TestCase):
             "--speculative-num-steps 3", "--speculative-eagle-topk 1",
             "--speculative-num-draft-tokens 4", "--disable-radix-cache",
             "--disable-prefill-cuda-graph", "--random-seed 42", "--host 0.0.0.0",
-            "--name qwen38-sglang-native-mtp", "-v /root/models/Jackrong/Qwopus3.8-27B-Flash-NVFP4-MTP:/model:ro",
+            "--name qwen38-sglang-native-mtp", "-v /root/models/Shiftedx/Qwopus3.8-27B-Flash-NVFP4-MTP:/model:ro",
             "local/sglang:qwen38-bounded-dflash-a1fe4e30",
         ):
             self.assertIn(flag, result.stdout)
@@ -159,6 +165,16 @@ class ContractTests(unittest.TestCase):
         self.assertIn('REPO_ROOT="$REPO_ROOT" BOUNDED_IMAGE_REF="$BOUNDED_IMAGE_REF" bash "$SCRIPT_DIR/build_bounded_image.sh"', source)
         self.assertNotIn('docker image inspect "$BOUNDED_IMAGE_REF" --format', source)
 
+    def test_native_download_setup_uses_the_pinned_image_and_only_the_native_snapshot(self):
+        source = SETUP.read_text(encoding="utf-8")
+        branches = re.findall(r"native_download\)\n(?P<body>.*?)\n    ;;", source, re.DOTALL)
+        self.assertEqual(len(branches), 2)
+        image_branch, snapshot_branch = branches
+        self.assertIn('docker pull "${IMAGE_TAG}@${IMAGE_DIGEST}"', image_branch)
+        self.assertIn('BOUNDED_IMAGE_REF="$BOUNDED_IMAGE_REF" bash "$SCRIPT_DIR/build_bounded_image.sh"', image_branch)
+        self.assertIn('download_snapshot "$TARGET_REPO" "$TARGET_REVISION"', snapshot_branch)
+        self.assertNotIn("DRAFT_REPO", snapshot_branch)
+
     def test_native_mtp_measurements_and_text_only_scope_are_documented(self):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         results = (ROOT / "benchmarks" / "RESULTS.md").read_text(encoding="utf-8")
@@ -184,6 +200,34 @@ class ContractTests(unittest.TestCase):
             "129,241-token physical pool",
         ):
             self.assertIn(value, readme)
+
+    def test_native_mtp_readme_links_the_public_checkpoint_and_needs_no_token(self):
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        native_section = readme.split("### Optional native-MTP NVFP4 profile", 1)[1].split("### Private-LAN access", 1)[0]
+        self.assertIn("https://huggingface.co/Shiftedx/Qwopus3.8-27B-Flash-NVFP4-MTP", native_section)
+        self.assertIn("cp profiles/rtx5090-native-mtp-nvfp4.env.example profile.env", native_section)
+        self.assertIn("bash scripts/setup_profile.sh", native_section)
+        self.assertIn("No Hugging Face token is required", native_section)
+        self.assertNotIn("HF_TOKEN", native_section)
+        self.assertNotIn("Shiftedx/Qwopus3.8-27B-Flash-NVFP4-MTP-RTX5090", native_section)
+
+    def test_native_mtp_results_record_the_current_matched_and_code_harnesses(self):
+        results = (ROOT / "benchmarks" / "RESULTS.md").read_text(encoding="utf-8")
+        for value in (
+            "138.7309", "138.9612", "138.5336", "204.7", "32.2% slower",
+            "159.6329", "159.5224", "159.8960",
+            "prior 405.5 code input was unrecoverable", "not apples-to-apples",
+        ):
+            self.assertIn(value, results)
+
+    def test_native_mtp_model_card_scopes_the_checkpoint_as_text_only_and_links_setup(self):
+        self.assertTrue(NATIVE_MTP_MODEL_CARD.is_file())
+        source = NATIVE_MTP_MODEL_CARD.read_text(encoding="utf-8")
+        self.assertIn("Text-only", source)
+        self.assertIn("does **not** support image or video input", source)
+        self.assertIn("https://github.com/shiftedx/Qwen3.8-27B-RTX5090-SGLang-DFlash", source)
+        self.assertIn("# Qwopus3.8-27B-Flash NVFP4 + MTP\n", source)
+        self.assertNotIn("# Qwopus3.8-27B-Flash NVFP4 + MTP — RTX 5090", source)
 
     def test_patch_is_exact_pinned_python_diff(self):
         source = PATCH.read_text(encoding="utf-8")

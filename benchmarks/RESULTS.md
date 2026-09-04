@@ -30,6 +30,19 @@ RTX 5090 with one active request, MTP-3 at 32K produced 121.28, 127.52, and
 126.91 tok/s for 512-token short runs after warmup. The tuned 131K profile
 produced 117.84, 126.09, and 123.57 tok/s for the same short-run method.
 
+The current public checkpoint was also measured with the recovered identical
+prose harness and the checked-in reproducible code harness, using streaming
+decode with one discarded warm-up and three measured runs:
+
+| Workload | Median decode | Measured runs (tok/s) |
+| --- | ---: | --- |
+| Recovered identical matched-prose harness | 138.7309 tok/s | 138.9612, 138.5336, 138.7309 |
+| Current reproducible code harness | 159.6329 tok/s | 159.6329, 159.5224, 159.8960 |
+
+The matched-prose median is 32.2% slower than the prior DFlash 204.7 tok/s
+result under that recovered identical harness. The prior 405.5 code input was unrecoverable, so the
+current code-harness result is not apples-to-apples with that historical row.
+
 | Workload | Result |
 | --- | ---: |
 | 100008+8 tokens | 26.143s |

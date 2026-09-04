@@ -35,6 +35,10 @@ case "${SETUP_MODE:-download}" in
   existing)
     REPO_ROOT="$REPO_ROOT" BOUNDED_IMAGE_REF="$BOUNDED_IMAGE_REF" bash "$SCRIPT_DIR/build_bounded_image.sh"
     ;;
+  native_download)
+    docker pull "${IMAGE_TAG}@${IMAGE_DIGEST}"
+    REPO_ROOT="$REPO_ROOT" BOUNDED_IMAGE_REF="$BOUNDED_IMAGE_REF" bash "$SCRIPT_DIR/build_bounded_image.sh"
+    ;;
   *) fail "unknown SETUP_MODE: ${SETUP_MODE}" ;;
 esac
 
@@ -100,6 +104,10 @@ case "${SETUP_MODE:-download}" in
   existing)
     [[ -s "$CANONICAL_MODEL_ROOT/$TARGET_REPO/config.json" ]] || fail "missing native checkpoint config: $CANONICAL_MODEL_ROOT/$TARGET_REPO/config.json"
     printf 'Profile and existing native checkpoint are ready.\n'
+    ;;
+  native_download)
+    download_snapshot "$TARGET_REPO" "$TARGET_REVISION"
+    printf 'Profile and pinned native checkpoint snapshot are ready.\n'
     ;;
   *) fail "unknown SETUP_MODE: ${SETUP_MODE}" ;;
 esac
