@@ -53,6 +53,7 @@ function Remove-QwenPortProxy {
 
 $wslAddress = Get-WslIPv4 -Distro $Distro
 $lanAddress = Get-WindowsLanIPv4
+$mirroredMode = $wslAddress -eq $lanAddress
 
 if (-not (Test-Administrator)) {
   $powershell = Join-Path $PSHOME 'powershell.exe'
@@ -67,13 +68,21 @@ if (-not (Test-Administrator)) {
 
 New-Item -ItemType Directory -Force -Path $StateDirectory | Out-Null
 $previous = if (Test-Path $StateFile) { Get-Content -Raw $StateFile | ConvertFrom-Json } else { $null }
+$addressesToRemove = @($lanAddress)
 if ($previous -and $previous.FirewallRuleName -eq $FirewallRuleName -and $previous.Port -eq $Port) {
-  try { Remove-QwenPortProxy -ListenAddress (ConvertTo-UsableIPv4 ([string]$previous.ListenAddress)) } catch { Write-Warning $_ }
+  foreach ($savedAddress in @($previous.ListenAddress, $previous.ProxyListenAddress)) {
+    if ([string]::IsNullOrWhiteSpace([string]$savedAddress)) { continue }
+    try { $addressesToRemove += ConvertTo-UsableIPv4 ([string]$savedAddress) } catch { Write-Warning $_ }
+  }
 }
-Remove-QwenPortProxy -ListenAddress $lanAddress
+$addressesToRemove = @($addressesToRemove | Select-Object -Unique)
+foreach ($address in $addressesToRemove) { Remove-QwenPortProxy -ListenAddress $address }
 
-& netsh.exe interface portproxy add v4tov4 "listenport=$Port" "listenaddress=$lanAddress" "connectport=$Port" "connectaddress=$wslAddress" protocol=tcp | Out-Null
-if ($LASTEXITCODE -ne 0) { throw "Failed to add TCP $Port port proxy from $lanAddress to $wslAddress." }
+$proxyExpected = -not $mirroredMode
+if ($proxyExpected) {
+  & netsh.exe interface portproxy add v4tov4 "listenport=$Port" "listenaddress=$lanAddress" "connectport=$Port" "connectaddress=$wslAddress" protocol=tcp | Out-Null
+  if ($LASTEXITCODE -ne 0) { throw "Failed to add TCP $Port port proxy from $lanAddress to $wslAddress." }
+}
 
 $existingRule = Get-NetFirewallRule -Name $FirewallRuleName -ErrorAction SilentlyContinue
 if ($existingRule) { $existingRule | Remove-NetFirewallRule }
@@ -85,22 +94,40 @@ $rule = Get-NetFirewallRule -Name $FirewallRuleName
 $portFilter = $rule | Get-NetFirewallPortFilter
 $addressFilter = $rule | Get-NetFirewallAddressFilter
 if ($rule.Profile -notmatch 'Private' -or $portFilter.LocalPort -notcontains [string]$Port -or
-    $addressFilter.RemoteAddress -notcontains 'LocalSubnet') {
+    $addressFilter.RemoteAddress -notcontains 'LocalSubnet' -or
+    $addressFilter.LocalAddress -notcontains $lanAddress) {
   throw "Firewall verification failed for $FirewallRuleName."
 }
 
 $proxyOutput = & netsh.exe interface portproxy show v4tov4
-$proxyPattern = ('{0}\s+{1}\s+{2}\s+{1}' -f [regex]::Escape($lanAddress), $Port, [regex]::Escape($wslAddress))
-if (($proxyOutput -join "`n") -notmatch $proxyPattern) { throw 'Port-proxy verification failed.' }
+$proxyText = $proxyOutput -join "`n"
+if ($proxyExpected) {
+  $proxyPattern = ('{0}\s+{1}\s+{2}\s+{1}' -f [regex]::Escape($lanAddress), $Port, [regex]::Escape($wslAddress))
+  if ($proxyText -notmatch $proxyPattern) { throw 'Port-proxy verification failed: expected the current NAT mapping.' }
+} else {
+  foreach ($address in $addressesToRemove) {
+    $stalePattern = ('{0}\s+{1}\s+' -f [regex]::Escape($address), $Port)
+    if ($proxyText -match $stalePattern) { throw 'Port-proxy verification failed: no proxy expected in mirrored mode.' }
+  }
+}
 
 [pscustomobject]@{
   Distro = $Distro
   Port = $Port
+  Mode = if ($mirroredMode) { 'Mirrored' } else { 'NAT' }
+  ProxyExpected = $proxyExpected
+  ProxyListenAddress = if ($proxyExpected) { $lanAddress } else { $null }
+  ProxyConnectAddress = if ($proxyExpected) { $wslAddress } else { $null }
   ListenAddress = $lanAddress
   ConnectAddress = $wslAddress
   FirewallRuleName = $FirewallRuleName
 } | ConvertTo-Json | Set-Content -Encoding UTF8 -Path $StateFile
 
-Write-Host "Qwen LAN forwarding enabled: http://$lanAddress`:$Port/v1"
+if ($mirroredMode) {
+  Write-Host "Qwen LAN access enabled (mirrored WSL networking): http://$lanAddress`:$Port/v1"
+  Write-Host 'No port proxy required; WSL shares the active Windows LAN IPv4 address.'
+} else {
+  Write-Host "Qwen LAN forwarding enabled: http://$lanAddress`:$Port/v1"
+}
 Write-Host "Local endpoint preserved: http://127.0.0.1`:$Port/v1"
 Write-Host 'Firewall scope: Private profile, LocalSubnet only.'
