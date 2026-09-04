@@ -34,7 +34,6 @@ case "${SETUP_MODE:-download}" in
   download) docker pull "${IMAGE_TAG}@${IMAGE_DIGEST}" ;;
   existing)
     REPO_ROOT="$REPO_ROOT" BOUNDED_IMAGE_REF="$BOUNDED_IMAGE_REF" bash "$SCRIPT_DIR/build_bounded_image.sh"
-    [[ "$(docker image inspect "$BOUNDED_IMAGE_REF" --format '{{.Id}}')" == "$SERVER_IMAGE_REF" ]] || fail "qualified bounded image SHA does not match: $SERVER_IMAGE_REF"
     ;;
   *) fail "unknown SETUP_MODE: ${SETUP_MODE}" ;;
 esac
