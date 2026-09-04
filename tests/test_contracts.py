@@ -85,7 +85,6 @@ class ContractTests(unittest.TestCase):
         for value in (
             "PROFILE=rtx5090-native-mtp-nvfp4",
             "CONTAINER_NAME=qwen38-sglang-native-mtp",
-            "SERVER_IMAGE_REF=sha256:c66b5add33e7a18992399a43b500a716ef28c44362a83c6e5b7d89d3dae48a9d",
             "BOUNDED_IMAGE_REF=local/sglang:qwen38-bounded-dflash-a1fe4e30",
             "MODEL_ROOT=/root/models",
             "TARGET_REPO=Jackrong/Qwopus3.8-27B-Flash-NVFP4-MTP",
@@ -100,6 +99,8 @@ class ContractTests(unittest.TestCase):
             "PORT=1234",
         ):
             self.assertIn(value, source)
+        self.assertNotIn("SERVER_IMAGE_REF=", source)
+        self.assertNotIn("c66b5add33e7a18992399a43b500a716ef28c44362a83c6e5b7d89d3dae48a9d", source)
 
     def test_resolve_runs_native_mtp_without_dflash_or_language_only_flags(self):
         values = dict(
@@ -123,9 +124,9 @@ class ContractTests(unittest.TestCase):
             "--speculative-algorithm EAGLE", "--speculative-draft-model-path /model",
             "--speculative-num-steps 3", "--speculative-eagle-topk 1",
             "--speculative-num-draft-tokens 4", "--disable-radix-cache",
-            "--disable-prefill-cuda-graph", "--random-seed 42", "--host 127.0.0.1",
+            "--disable-prefill-cuda-graph", "--random-seed 42", "--host 0.0.0.0",
             "--name qwen38-sglang-native-mtp", "-v /root/models/Jackrong/Qwopus3.8-27B-Flash-NVFP4-MTP:/model:ro",
-            "sha256:c66b5add33e7a18992399a43b500a716ef28c44362a83c6e5b7d89d3dae48a9d",
+            "local/sglang:qwen38-bounded-dflash-a1fe4e30",
         ):
             self.assertIn(flag, result.stdout)
         for forbidden in (
@@ -153,19 +154,36 @@ class ContractTests(unittest.TestCase):
             self.assertEqual(selected_engine.returncode, 0, selected_engine.stderr)
             self.assertEqual(selected_engine.stdout, "native_mtp")
 
+    def test_native_existing_setup_uses_bounded_image_provenance_not_a_local_image_id(self):
+        source = SETUP.read_text(encoding="utf-8")
+        self.assertIn('REPO_ROOT="$REPO_ROOT" BOUNDED_IMAGE_REF="$BOUNDED_IMAGE_REF" bash "$SCRIPT_DIR/build_bounded_image.sh"', source)
+        self.assertNotIn('docker image inspect "$BOUNDED_IMAGE_REF" --format', source)
+
     def test_native_mtp_measurements_and_text_only_scope_are_documented(self):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         results = (ROOT / "benchmarks" / "RESULTS.md").read_text(encoding="utf-8")
-        for source in (readme, results):
-            for value in (
-                "121.28", "127.52", "126.91", "117.84", "126.09", "123.57",
-                "100008+8", "26.143", "128008+8", "40.365", "129241",
-                "this-machine measurements",
-            ):
-                self.assertIn(value, source)
+        for value in (
+            "121.28", "127.52", "126.91", "117.84", "126.09", "123.57",
+            "100008+8", "26.143", "128008+8", "40.365", "129241",
+            "this-machine measurements",
+        ):
+            self.assertIn(value, results)
+        self.assertIn("[benchmarks/RESULTS.md]", readme)
+        self.assertNotIn("121.28", readme)
         self.assertIn("text-only", readme)
         self.assertIn("SGLang itself supports vision", readme)
         self.assertIn("future work", readme)
+
+    def test_native_mtp_readme_documents_the_emitted_capacity_and_speculation_contract(self):
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        for value in (
+            "memory fraction 0.96", "Mamba cache size 1",
+            "EAGLE steps 3, top-k 1, and 4 draft tokens", "FP8 E4M3 KV cache",
+            "prefill chunk 1,024", "radix cache off", "prefill CUDA graph off",
+            "one running request", "131,072-token logical context",
+            "129,241-token physical pool",
+        ):
+            self.assertIn(value, readme)
 
     def test_patch_is_exact_pinned_python_diff(self):
         source = PATCH.read_text(encoding="utf-8")
@@ -319,7 +337,7 @@ class ContractTests(unittest.TestCase):
             "--disable-radix-cache", "--disable-prefill-cuda-graph",
             "--weight-loader-drop-cache-after-load", "--random-seed 42",
             "--max-running-requests 1",
-            "--host 127.0.0.1",
+            "--host 0.0.0.0",
         ):
             self.assertIn(flag, result.stdout)
 

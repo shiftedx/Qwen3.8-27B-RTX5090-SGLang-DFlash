@@ -87,11 +87,19 @@ This profile uses the existing read-only checkpoint directory
 `/root/models/Jackrong/Qwopus3.8-27B-Flash-NVFP4-MTP`, mounts it as `/model`
 for both target and native draft weights, and serves
 `qwopus3.8-27b-nvfp4-mtp` on port 1234. Setup builds and verifies the qualified
-bounded SGLang image SHA from the example profile before it launches. It intentionally does not pass
+bounded SGLang image from the example profile using its pinned base, SGLang
+revision, patch checksum, and provenance labels before it launches. It intentionally does not pass
 `--language-only`: the checkpoint configuration already declares
 `language_model_only=true`, while that SGLang switch triggers an
 encoder-disaggregation crash for this wrapper. There are no DFlash or CPU
 offload flags in this profile.
+
+The emitted native-MTP contract uses FP8 E4M3 KV cache, memory fraction 0.96,
+prefill chunk 1,024, Mamba cache size 1, and one running request. Speculation
+uses EAGLE steps 3, top-k 1, and 4 draft tokens, with radix cache off and
+prefill CUDA graph off. This keeps the measured one-stream behavior. The
+131,072-token logical context is
+capped by SGLang's auto-profiled 129,241-token physical pool.
 
 This custom checkpoint is text-only. SGLang itself supports vision; a separate
 sibling vision build is future work.
@@ -181,14 +189,9 @@ python3 scripts/benchmark.py --label harness-code \
 
 ### Native-MTP NVFP4 evidence
 
-These are **this-machine measurements**, not universal promises: one RTX 5090,
-one active request, and the listed prompt/configuration. At MTP-3 with a 32K
-configuration, 512-token short runs after warmup were 121.28, 127.52, and
-126.91 tok/s. With the tuned 131K profile they were 117.84, 126.09, and 123.57
-tok/s. The 100008+8-token run completed in 26.143s; the 128008+8-token run
-completed in 40.365s. SGLang auto-profiled the physical pool to 129241 tokens,
-which is why the profile uses that `MAX_TOTAL_TOKENS` value rather than the
-131072-token logical context ceiling.
+Native-MTP results are **this-machine measurements**, not universal promises.
+The exact runs, timings, and methodology are canonical in
+[benchmarks/RESULTS.md](benchmarks/RESULTS.md).
 
 ## Operations
 

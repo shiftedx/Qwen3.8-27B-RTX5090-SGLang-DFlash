@@ -18,7 +18,7 @@ container_running() { [[ "$(docker inspect -f '{{.State.Running}}' "$CONTAINER_N
 fail() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 
 build_args() {
-  args=(--model-path /model --served-model-name "$SERVED_MODEL_NAME" --host 127.0.0.1 --port "$PORT"
+  args=(--model-path /model --served-model-name "$SERVED_MODEL_NAME" --host 0.0.0.0 --port "$PORT"
     --kv-cache-dtype "$KV_CACHE_DTYPE" --attention-backend flashinfer --context-length "$CONTEXT_LENGTH"
     --chunked-prefill-size "$CHUNKED_PREFILL_SIZE" --mamba-radix-cache-strategy extra_buffer
     --mamba-ssm-dtype bfloat16 --max-mamba-cache-size "${MAX_MAMBA_CACHE_SIZE:-8}"
