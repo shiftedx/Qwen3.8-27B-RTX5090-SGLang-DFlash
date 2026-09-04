@@ -9,6 +9,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PROFILE = ROOT / "profiles" / "rtx5090-152k.env.example"
+NATIVE_MTP_PROFILE = ROOT / "profiles" / "rtx5090-native-mtp-nvfp4.env.example"
 PATCH = ROOT / "patches" / "sglang-bounded-dflash.patch"
 BUILD = ROOT / "scripts" / "build_bounded_image.sh"
 SERVER = ROOT / "scripts" / "server.sh"
@@ -60,6 +61,94 @@ class ContractTests(unittest.TestCase):
         ):
             self.assertIn(value, source)
 
+    def test_native_mtp_profile_publishes_the_qualified_runtime_contract(self):
+        self.assertTrue(NATIVE_MTP_PROFILE.is_file())
+        source = NATIVE_MTP_PROFILE.read_text(encoding="utf-8")
+        for value in (
+            "PROFILE=rtx5090-native-mtp-nvfp4",
+            "CONTAINER_NAME=qwen38-sglang-native-mtp",
+            "SERVER_IMAGE_REF=sha256:c66b5add33e7a18992399a43b500a716ef28c44362a83c6e5b7d89d3dae48a9d",
+            "BOUNDED_IMAGE_REF=local/sglang:qwen38-bounded-dflash-a1fe4e30",
+            "MODEL_ROOT=/root/models",
+            "TARGET_REPO=Jackrong/Qwopus3.8-27B-Flash-NVFP4-MTP",
+            "ENGINE=native_mtp",
+            "CONTEXT_LENGTH=131072",
+            "MAX_TOTAL_TOKENS=129241",
+            "CHUNKED_PREFILL_SIZE=1024",
+            "MAX_MAMBA_CACHE_SIZE=1",
+            "MEM_FRACTION_STATIC=0.96",
+            "MAX_RUNNING_REQUESTS=1",
+            "RANDOM_SEED=42",
+            "PORT=1234",
+        ):
+            self.assertIn(value, source)
+
+    def test_resolve_runs_native_mtp_without_dflash_or_language_only_flags(self):
+        values = dict(
+            line.split("=", 1)
+            for line in NATIVE_MTP_PROFILE.read_text(encoding="utf-8").splitlines()
+            if line and not line.startswith("#")
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = Path(tmp) / "profile.env"
+            profile.write_text("\n".join(f"{key}={value}" for key, value in values.items()) + "\n", encoding="utf-8")
+            result = subprocess.run(
+                ["bash", str(SERVER), "resolve"], text=True, capture_output=True,
+                env=os.environ | {"QWEN_PROFILE": str(profile)}, check=False,
+            )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for flag in (
+            "--model-path /model", "--served-model-name qwopus3.8-27b-nvfp4-mtp",
+            "--max-total-tokens 129241", "--context-length 131072",
+            "--chunked-prefill-size 1024", "--max-mamba-cache-size 1",
+            "--mem-fraction-static 0.96", "--max-running-requests 1",
+            "--speculative-algorithm EAGLE", "--speculative-draft-model-path /model",
+            "--speculative-num-steps 3", "--speculative-eagle-topk 1",
+            "--speculative-num-draft-tokens 4", "--disable-radix-cache",
+            "--disable-prefill-cuda-graph", "--random-seed 42", "--host 127.0.0.1",
+            "--name qwen38-sglang-native-mtp", "-v /root/models/Jackrong/Qwopus3.8-27B-Flash-NVFP4-MTP:/model:ro",
+            "sha256:c66b5add33e7a18992399a43b500a716ef28c44362a83c6e5b7d89d3dae48a9d",
+        ):
+            self.assertIn(flag, result.stdout)
+        for forbidden in (
+            "--language-only", "--mm-feature-transport", "--speculative-dflash",
+            "--speculative-draft-model-quantization", "/model_dflash", "--cpu-offload",
+        ):
+            self.assertNotIn(forbidden, result.stdout)
+
+    def test_setup_can_seed_the_native_mtp_profile_without_changing_the_default(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "portable repo"; root.mkdir()
+            profile = Path(tmp) / "native-mtp.env"
+            result = subprocess.run(
+                ["bash", str(SETUP), "--write-profile-only"], text=True, capture_output=True,
+                env=os.environ | {
+                    "REPO_ROOT": str(root), "QWEN_PROFILE": str(profile),
+                    "QWEN_PROFILE_TEMPLATE": str(NATIVE_MTP_PROFILE),
+                }, check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            selected_engine = subprocess.run(
+                ["bash", "-c", 'source "$1"; printf "%s" "$ENGINE"', "--", str(profile)],
+                text=True, capture_output=True, check=False,
+            )
+            self.assertEqual(selected_engine.returncode, 0, selected_engine.stderr)
+            self.assertEqual(selected_engine.stdout, "native_mtp")
+
+    def test_native_mtp_measurements_and_text_only_scope_are_documented(self):
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        results = (ROOT / "benchmarks" / "RESULTS.md").read_text(encoding="utf-8")
+        for source in (readme, results):
+            for value in (
+                "121.28", "127.52", "126.91", "117.84", "126.09", "123.57",
+                "100008+8", "26.143", "128008+8", "40.365", "129241",
+                "this-machine measurements",
+            ):
+                self.assertIn(value, source)
+        self.assertIn("text-only", readme)
+        self.assertIn("SGLang itself supports vision", readme)
+        self.assertIn("future work", readme)
+
     def test_patch_is_exact_pinned_python_diff(self):
         source = PATCH.read_text(encoding="utf-8")
         self.assertEqual(
@@ -87,7 +176,7 @@ class ContractTests(unittest.TestCase):
             for path in tracked
             if not path.startswith(("tests/", ".github/", "ci/"))
         )
-        for forbidden in ("C:\\Users\\Kyle", "/root/src/sglang-bounded-dflash", "sha256:c66b5"):
+        for forbidden in ("C:\\Users\\Kyle", "/root/src/sglang-bounded-dflash"):
             self.assertNotIn(forbidden, text)
         self.assertIn("REPO_ROOT=$HOME/", PROFILE.read_text(encoding="utf-8"))
         self.assertIn("MODEL_ROOT=$HOME/models", PROFILE.read_text(encoding="utf-8"))

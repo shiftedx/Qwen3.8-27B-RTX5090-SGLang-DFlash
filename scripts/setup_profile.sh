@@ -5,10 +5,12 @@ readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 readonly SCRIPT_REPO_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 readonly DEFAULT_REPO_ROOT="${REPO_ROOT:-$SCRIPT_REPO_ROOT}"
 readonly PROFILE_FILE="${QWEN_PROFILE:-$DEFAULT_REPO_ROOT/profile.env}"
-readonly EXAMPLE="$SCRIPT_REPO_ROOT/profiles/rtx5090-152k.env.example"
+PROFILE_TEMPLATE="${QWEN_PROFILE_TEMPLATE:-profiles/rtx5090-152k.env.example}"
+[[ "$PROFILE_TEMPLATE" = /* ]] || PROFILE_TEMPLATE="$SCRIPT_REPO_ROOT/$PROFILE_TEMPLATE"
+readonly PROFILE_TEMPLATE
 fail() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 write_default_profile() {
-  [[ -f "$EXAMPLE" ]] || fail "missing profile example: $EXAMPLE"
+  [[ -f "$PROFILE_TEMPLATE" ]] || fail "missing profile example: $PROFILE_TEMPLATE"
   mkdir -p "$(dirname "$PROFILE_FILE")"
   while IFS= read -r line || [[ -n "$line" ]]; do
     case "$line" in
@@ -16,7 +18,7 @@ write_default_profile() {
       DEPLOY_ROOT=*) printf 'DEPLOY_ROOT=%q\n' "$DEFAULT_REPO_ROOT" ;;
       *) printf '%s\n' "$line" ;;
     esac
-  done < "$EXAMPLE" > "$PROFILE_FILE"
+  done < "$PROFILE_TEMPLATE" > "$PROFILE_FILE"
 }
 if [[ ! -f "$PROFILE_FILE" ]]; then write_default_profile; fi
 if [[ "${1:-}" == "--write-profile-only" ]]; then exit 0; fi
@@ -25,11 +27,17 @@ source "$PROFILE_FILE"
 [[ -d "$REPO_ROOT" ]] || fail "REPO_ROOT does not exist: $REPO_ROOT"
 validate_repo_id() { [[ "$1" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || fail "invalid model repository ID: $1"; }
 validate_repo_id "$TARGET_REPO"
-validate_repo_id "$DRAFT_REPO"
 readonly CANONICAL_MODEL_ROOT="$(realpath -m "$MODEL_ROOT")"
 mkdir -p "$DEPLOY_ROOT/.state" "$CANONICAL_MODEL_ROOT"
 bash "$SCRIPT_DIR/preflight.sh"
-docker pull "${IMAGE_TAG}@${IMAGE_DIGEST}"
+case "${SETUP_MODE:-download}" in
+  download) docker pull "${IMAGE_TAG}@${IMAGE_DIGEST}" ;;
+  existing)
+    REPO_ROOT="$REPO_ROOT" BOUNDED_IMAGE_REF="$BOUNDED_IMAGE_REF" bash "$SCRIPT_DIR/build_bounded_image.sh"
+    [[ "$(docker image inspect "$BOUNDED_IMAGE_REF" --format '{{.Id}}')" == "$SERVER_IMAGE_REF" ]] || fail "qualified bounded image SHA does not match: $SERVER_IMAGE_REF"
+    ;;
+  *) fail "unknown SETUP_MODE: ${SETUP_MODE}" ;;
+esac
 
 quarantine_snapshot() {
   local destination="$1"
@@ -82,7 +90,17 @@ PY
   snapshot_is_complete "$destination" "$revision" || fail "pinned snapshot is incomplete: $repo@$revision"
 }
 
-download_snapshot "$TARGET_REPO" "$TARGET_REVISION"
-download_snapshot "$DRAFT_REPO" "$DRAFT_REVISION"
-REPO_ROOT="$REPO_ROOT" BOUNDED_IMAGE_REF="$BOUNDED_IMAGE_REF" bash "$SCRIPT_DIR/build_bounded_image.sh"
-printf 'Profile and pinned model snapshots are ready.\n'
+case "${SETUP_MODE:-download}" in
+  download)
+    validate_repo_id "$DRAFT_REPO"
+    download_snapshot "$TARGET_REPO" "$TARGET_REVISION"
+    download_snapshot "$DRAFT_REPO" "$DRAFT_REVISION"
+    REPO_ROOT="$REPO_ROOT" BOUNDED_IMAGE_REF="$BOUNDED_IMAGE_REF" bash "$SCRIPT_DIR/build_bounded_image.sh"
+    printf 'Profile and pinned model snapshots are ready.\n'
+    ;;
+  existing)
+    [[ -s "$CANONICAL_MODEL_ROOT/$TARGET_REPO/config.json" ]] || fail "missing native checkpoint config: $CANONICAL_MODEL_ROOT/$TARGET_REPO/config.json"
+    printf 'Profile and existing native checkpoint are ready.\n'
+    ;;
+  *) fail "unknown SETUP_MODE: ${SETUP_MODE}" ;;
+esac

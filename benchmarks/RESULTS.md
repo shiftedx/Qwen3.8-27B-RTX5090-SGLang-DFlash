@@ -22,3 +22,19 @@ fresh raw JSONL outside version control (for example `.state/`).
 prose result. The original measured code input was not recoverable, so
 `prompts/harness-code.txt` is a reproducible harness example only; it does not
 claim to reproduce the measured code row.
+
+## Native-MTP NVFP4 evidence
+
+These are **this-machine measurements**, not universal promises. On the same
+RTX 5090 with one active request, MTP-3 at 32K produced 121.28, 127.52, and
+126.91 tok/s for 512-token short runs after warmup. The tuned 131K profile
+produced 117.84, 126.09, and 123.57 tok/s for the same short-run method.
+
+| Workload | Result |
+| --- | ---: |
+| 100008+8 tokens | 26.143s |
+| 128008+8 tokens | 40.365s |
+
+SGLang auto-profiled the physical pool to 129241 tokens; the native profile
+therefore uses that as `MAX_TOTAL_TOKENS` under its 131072-token logical
+context limit.
