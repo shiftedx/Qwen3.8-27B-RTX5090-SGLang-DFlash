@@ -77,7 +77,7 @@ MTP checkpoint, replace the ignored local profile before setup/start; its
 profile-specific container name also makes the desktop start/stop launchers
 operate on the selected engine. The public
 [checkpoint](https://huggingface.co/Shiftedx/Qwopus3.8-27B-Flash-NVFP4-MTP)
-is downloaded at immutable revision `667b435e24ffdd149f7ed4780cbe066e7e2d4446`.
+is downloaded at immutable revision `e46dcfbe1aef581743509edb3a3c2c8934c3942d`.
 
 ```bash
 cp profiles/rtx5090-native-mtp-nvfp4.env.example profile.env

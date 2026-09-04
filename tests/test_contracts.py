@@ -11,7 +11,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 PROFILE = ROOT / "profiles" / "rtx5090-152k.env.example"
 NATIVE_MTP_PROFILE = ROOT / "profiles" / "rtx5090-native-mtp-nvfp4.env.example"
-NATIVE_MTP_MODEL_CARD = ROOT / "model-cards" / "qwopus3.8-27b-flash-nvfp4-mtp-rtx5090.md"
+NATIVE_MTP_MODEL_CARD = ROOT / "model-cards" / "qwopus3.8-27b-flash-nvfp4-mtp.md"
 PATCH = ROOT / "patches" / "sglang-bounded-dflash.patch"
 BUILD = ROOT / "scripts" / "build_bounded_image.sh"
 SERVER = ROOT / "scripts" / "server.sh"
@@ -90,7 +90,7 @@ class ContractTests(unittest.TestCase):
             "BOUNDED_IMAGE_REF=local/sglang:qwen38-bounded-dflash-a1fe4e30",
             "MODEL_ROOT=$HOME/models",
             "TARGET_REPO=Shiftedx/Qwopus3.8-27B-Flash-NVFP4-MTP",
-            "TARGET_REVISION=667b435e24ffdd149f7ed4780cbe066e7e2d4446",
+            "TARGET_REVISION=e46dcfbe1aef581743509edb3a3c2c8934c3942d",
             "ENGINE=native_mtp",
             "SETUP_MODE=native_download",
             "CONTEXT_LENGTH=131072",
