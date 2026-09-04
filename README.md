@@ -1,4 +1,4 @@
-# Qwen3.8 27B on one RTX 5090 with SGLang DFlash
+# Qwen3.8 27B on one RTX 5090 with SGLang DFlash or native MTP
 
 Portable WSL launch tooling for the NVFP4 Qwen3.8 target and DFlash2 draft
 model. It builds a pinned SGLang image with a bundled bounded-DFlash patch,
@@ -69,6 +69,32 @@ curl http://127.0.0.1:1234/v1/chat/completions \
   -H 'content-type: application/json' \
   -d '{"model":"qwen3.8-27b-nvfp4","messages":[{"role":"user","content":"Reply with exactly: ready"}],"max_tokens":16}'
 ```
+
+### Optional native-MTP NVFP4 profile
+
+The default remains the qualified DFlash profile. To select the separate native
+MTP checkpoint, replace the ignored local profile before setup/start; its
+profile-specific container name also makes the desktop start/stop launchers
+operate on the selected engine.
+
+```bash
+cp profiles/rtx5090-native-mtp-nvfp4.env.example profile.env
+bash scripts/setup_profile.sh
+bash scripts/server.sh start
+```
+
+This profile uses the existing read-only checkpoint directory
+`/root/models/Jackrong/Qwopus3.8-27B-Flash-NVFP4-MTP`, mounts it as `/model`
+for both target and native draft weights, and serves
+`qwopus3.8-27b-nvfp4-mtp` on port 1234. Setup builds and verifies the qualified
+bounded SGLang image SHA from the example profile before it launches. It intentionally does not pass
+`--language-only`: the checkpoint configuration already declares
+`language_model_only=true`, while that SGLang switch triggers an
+encoder-disaggregation crash for this wrapper. There are no DFlash or CPU
+offload flags in this profile.
+
+This custom checkpoint is text-only. SGLang itself supports vision; a separate
+sibling vision build is future work.
 
 ### Private-LAN access
 
@@ -149,6 +175,17 @@ python3 scripts/benchmark.py --label harness-code \
   --prompt-file benchmarks/prompts/harness-code.txt \
   --output .state/harness-code.jsonl --warmups 1 --repeats 3 --max-tokens 512
 ```
+
+### Native-MTP NVFP4 evidence
+
+These are **this-machine measurements**, not universal promises: one RTX 5090,
+one active request, and the listed prompt/configuration. At MTP-3 with a 32K
+configuration, 512-token short runs after warmup were 121.28, 127.52, and
+126.91 tok/s. With the tuned 131K profile they were 117.84, 126.09, and 123.57
+tok/s. The 100008+8-token run completed in 26.143s; the 128008+8-token run
+completed in 40.365s. SGLang auto-profiled the physical pool to 129241 tokens,
+which is why the profile uses that `MAX_TOTAL_TOKENS` value rather than the
+131072-token logical context ceiling.
 
 ## Operations
 
