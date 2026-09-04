@@ -48,6 +48,24 @@ class ContractTests(unittest.TestCase):
         self.assertNotIn("-Profile Any", helper)
         self.assertNotIn("-RemoteAddress Any", helper)
 
+    def test_lan_helper_branches_for_mirrored_and_nat_networking(self):
+        helper = LAN_HELPER.read_text(encoding="utf-8")
+        self.assertIn("$mirroredMode = $wslAddress -eq $lanAddress", helper)
+        self.assertIn("if ($mirroredMode)", helper)
+        self.assertIn("ProxyExpected", helper)
+        self.assertIn("Mode = if ($mirroredMode) { 'Mirrored' } else { 'NAT' }", helper)
+        self.assertIn("$addressesToRemove = @($lanAddress)", helper)
+        self.assertIn("foreach ($address in $addressesToRemove) { Remove-QwenPortProxy -ListenAddress $address }", helper)
+        self.assertIn("expected the current NAT mapping.", helper)
+        self.assertIn("Port-proxy verification failed: no proxy expected in mirrored mode.", helper)
+
+    def test_lan_helper_state_records_mode_and_proxy_diagnostics(self):
+        helper = LAN_HELPER.read_text(encoding="utf-8")
+        self.assertIn("Mode = if ($mirroredMode) { 'Mirrored' } else { 'NAT' }", helper)
+        self.assertIn("ProxyExpected = $proxyExpected", helper)
+        self.assertIn("ProxyListenAddress", helper)
+        self.assertIn("ProxyConnectAddress", helper)
+
     def test_profile_has_pinned_qualified_values(self):
         source = PROFILE.read_text(encoding="utf-8")
         for value in (

@@ -100,8 +100,11 @@ sibling vision build is future work.
 
 `windows/Start-Qwen-Max.cmd` also runs `Enable-Qwen-LAN.ps1`. On first use—or
 after a WSL or LAN address change—Windows displays a normal UAC prompt. The
-helper refreshes a TCP 1234 port proxy to Ubuntu and creates one inbound
-Windows Firewall rule named `QwenSGLangLAN1234`.
+helper detects whether WSL is using mirrored networking. In mirrored mode,
+when the usable WSL eth0 IPv4 equals the active Windows LAN IPv4, it removes
+any saved/current Qwen port proxy and serves the LAN address directly. In NAT
+mode it refreshes a TCP 1234 port proxy to Ubuntu. Both modes retain one
+inbound Windows Firewall rule named `QwenSGLangLAN1234`.
 
 The rule is restricted to the Windows **Private** profile and
 `LocalSubnet`; it is never opened for Public networks. The API is
@@ -118,9 +121,9 @@ From another trusted LAN device:
 curl http://<windows-lan-ip>:1234/v1/models
 ```
 
-The helper records only its own previous mapping under
-`%ProgramData%\QwenSGLang`, allowing the next desktop start to refresh a
-changed WSL address without touching unrelated port proxies.
+The helper records its mode and proxy state under `%ProgramData%\QwenSGLang`,
+allowing the next desktop start to remove stale saved/current mappings without
+touching unrelated port proxies.
 
 ## Profile and capacity semantics
 
