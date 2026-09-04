@@ -271,7 +271,9 @@ class ContractTests(unittest.TestCase):
         self.assertIn("wslpath -a", installer)
         for launcher in (ROOT / "windows" / "Start-Qwen-Max.cmd", ROOT / "windows" / "Stop-Qwen-Max.cmd"):
             self.assertIn("wsl.exe -d", launcher.read_text(encoding="utf-8"))
-        self.assertIn("*.sh text eol=lf", (ROOT / ".gitattributes").read_text(encoding="utf-8"))
+        attributes = (ROOT / ".gitattributes").read_text(encoding="utf-8")
+        self.assertIn("*.sh text eol=lf", attributes)
+        self.assertIn("*.env.example text eol=lf", attributes)
 
     def test_installer_parses_and_generated_launchers_are_quoted(self):
         source = INSTALLER.read_text(encoding="utf-8")
