@@ -6,7 +6,7 @@ not guarantees: throughput depends on the prompt and DFlash acceptance rate.
 | Workload | Result |
 | --- | ---: |
 | Matched short-context prose at 152 Ki (median, 3 measured runs after one warmup) | 204.7 tok/s |
-| Matched short-context code at 152 Ki (median, 3 measured runs after one warmup) | 405.5 tok/s |
+| Short-context code at 152 Ki (median, 3 measured runs after one warmup; **historical, not reproducible**: original prompt lost) | 405.5 tok/s |
 | 8,187-token input plus 1,024-token output (one production cold-start gate) | 130.6 tok/s |
 | 154,515-token input plus 1,024-token output (second production cold-start repeat) | 138.3 tok/s |
 

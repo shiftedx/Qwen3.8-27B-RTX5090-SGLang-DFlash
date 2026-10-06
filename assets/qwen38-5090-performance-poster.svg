@@ -41,7 +41,7 @@
     <rect x="560" y="732" width="478" height="156" fill="#ff3b30"/>
     <text x="584" y="808" class="display" fill="#090909" font-size="76">405.5</text>
     <text x="867" y="803" class="mono" fill="#090909" font-size="18">TOK/S</text>
-    <text x="584" y="852" class="mono" fill="#090909" font-size="17">MATCHED CODE · MEDIAN 3 · AFTER WARMUP</text>
+    <text x="584" y="852" class="mono" fill="#090909" font-size="17">CODE · HISTORICAL · NOT REPRODUCIBLE</text>
     <rect x="42" y="916" width="478" height="142" fill="#242424"/>
     <text x="66" y="982" class="display ivory" font-size="62">130.6</text>
     <text x="319" y="978" class="mono muted" font-size="18">TOK/S</text>

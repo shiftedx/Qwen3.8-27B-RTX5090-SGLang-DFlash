@@ -21,7 +21,7 @@ jobs:
       - run: python -c "from pathlib import Path; bad=[str(p) for p in Path('scripts').glob('*.sh') if b'\r\n' in p.read_bytes()]; assert not bad, bad"
       - run: |
           set +e
-          git grep -n -i -E '(hf_[a-z0-9]{20,}|api[_-]?key[[:space:]]*=|password[[:space:]]*=|C:\\Users\\ExampleUser|/root/src/sglang-bounded-dflash)' -- ':!tests/**' ':!.github/workflows/ci.yml'
+          git grep -n -i -E '(hf_[a-z0-9]{20,}|api[_-]?key[[:space:]]*=|password[[:space:]]*=|C:\\Users\\[a-z]|/root/src/sglang-bounded-dflash)' -- ':!tests/**' ':!.github/workflows/ci.yml'
           status=$?
           set -e
           case "$status" in

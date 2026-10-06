@@ -256,7 +256,7 @@ class ContractTests(unittest.TestCase):
             for path in tracked
             if not path.startswith(("tests/", ".github/", "ci/"))
         )
-        for forbidden in ("C:\\Users\\ExampleUser", "/root/src/sglang-bounded-dflash"):
+        for forbidden in ("C:\\Users\\","/root/src/sglang-bounded-dflash"):
             self.assertNotIn(forbidden, text)
         self.assertIn("REPO_ROOT=$HOME/", PROFILE.read_text(encoding="utf-8"))
         self.assertIn("MODEL_ROOT=$HOME/models", PROFILE.read_text(encoding="utf-8"))
