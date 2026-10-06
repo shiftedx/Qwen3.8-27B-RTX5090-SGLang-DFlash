@@ -119,7 +119,7 @@ class ContractTests(unittest.TestCase):
             profile.write_text("\n".join(f"{key}={value}" for key, value in values.items()) + "\n", encoding="utf-8")
             result = subprocess.run(
                 ["bash", str(SERVER), "resolve"], text=True, capture_output=True,
-                env=os.environ | {"QWEN_PROFILE": str(profile)}, check=False,
+                env=os.environ | {"HOME": "/root", "QWEN_PROFILE": str(profile)}, check=False,
             )
         self.assertEqual(result.returncode, 0, result.stderr)
         for flag in (
